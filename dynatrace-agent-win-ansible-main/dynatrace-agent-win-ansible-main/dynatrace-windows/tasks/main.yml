@@ -1,0 +1,59 @@
+---
+# tasks file for dynatrace-windows
+- name: Download Dynatrace on Target
+  ansible.windows.win_powershell:
+    script: |
+      powershell -command "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri '{{ Uri }}' -Headers @{ 'Authorization' = '{{ ApiToken }}' } -OutFile '{{ OutFile }}'"
+
+- name: Check if its downloaded at {{ OutFile }}
+  win_stat:
+    path: "{{ OutFile }}"
+  register: file_exist
+
+- name: Report if dynatrace exists
+  debug:
+    msg: "The file exists"
+  when: file_exist.stat.exists
+
+- name: Report if dynatrace is missing
+  debug:
+    msg: "The file is not downloaded"
+  when: not file_exist.stat.exists
+
+- name: Check if Dynatrace is installed or not
+  ansible.windows.win_powershell:
+    script: |
+       powershell -command "Get-WmiObject -Class Win32_Product  | where Name -eq 'Dynatrace OneAgent' | select Name, Version"
+  register: getobject
+
+- name: debug
+  debug:
+   var: getobject.output
+
+
+- name: Install dynatrace
+  win_package:
+    path: "{{ dynatrace_oneagent_install_script }}"
+    creates_service: "{{ dynatrace_oneagent_service_name }}"
+    arguments: "{{ oneagent_install_param.results | map(attribute='ansible_facts.oneagent_install_params') | join(' ') }} --quiet"
+    state: "{{ dynatrace_oneagent_package_state }}"
+  when: ansible_system|lower == "win32nt"
+
+- name: create/update hostautotag.conf file | windows
+    win_copy:
+      dest: "{{ dynatrace_oneagent_hostautotag_config_file }}"
+      content: "{{ dynatrace_oneagent_host_tags }}"
+    when: ansible_system|lower == "win32nt"
+
+- name: create/update hostcustomproperties.conf file | windows
+    win_copy:
+      dest: "{{ dynatrace_oneagent_hostmetadata_config_file }}"
+      content: "{{ dynatrace_oneagent_host_metadata }}"
+    when: dynatrace_oneagent_host_metadata
+
+- name: create/update hostname.conf file | windows
+    win_copy:
+      dest: "{{ dynatrace_oneagent_hostname_config_file }}"
+      content: "{{ dynatrace_oneagent_hostname }}"
+    when: dynatrace_oneagent_hostname 
+    notify: restart oneagent windows
